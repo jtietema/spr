@@ -21,7 +21,6 @@ use std::collections::{HashMap, HashSet};
 pub struct GitHub {
     config: crate::config::Config,
     git: crate::git::Git,
-    graphql_client: reqwest::Client,
 }
 
 #[derive(Debug, Clone)]
@@ -134,18 +133,27 @@ impl GitHub {
     pub fn new(
         config: crate::config::Config,
         git: crate::git::Git,
-        graphql_client: reqwest::Client,
     ) -> Self {
         Self {
             config,
             git,
-            graphql_client,
         }
     }
 
-    async fn get_github_user(login: String) -> Result<UserWithName> {
+    pub async fn get_github_user(login: String) -> Result<UserWithName> {
         octocrab::instance()
             .get::<UserWithName, _, _>(format!("users/{}", login), None::<&()>)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub async fn get_github_team(
+        owner: String,
+        team: String,
+    ) -> Result<octocrab::models::teams::Team> {
+        octocrab::instance()
+            .teams(owner)
+            .get(team)
             .await
             .map_err(Error::from)
     }
@@ -154,7 +162,6 @@ impl GitHub {
         let GitHub {
             config,
             git,
-            graphql_client,
         } = self;
 
         let variables = pull_request_query::Variables {
@@ -163,13 +170,9 @@ impl GitHub {
             number: number as i64,
         };
         let request_body = PullRequestQuery::build_query(variables);
-        let res = graphql_client
-            .post(config.api_base_url() + "graphql")
-            .json(&request_body)
-            .send()
+        let response_body: Response<pull_request_query::ResponseData> = octocrab::instance()
+            .post("graphql", Some(&request_body))
             .await?;
-        let response_body: Response<pull_request_query::ResponseData> =
-            res.json().await?;
 
         if let Some(errors) = response_body.errors {
             let error =
@@ -374,60 +377,6 @@ impl GitHub {
         Ok(())
     }
 
-    pub async fn get_reviewers(
-        &self,
-    ) -> Result<HashMap<String, Option<String>>> {
-        let github = self.clone();
-
-        let (users, teams): (
-            Vec<UserWithName>,
-            octocrab::Page<octocrab::models::teams::RequestedTeam>,
-        ) = futures_lite::future::try_zip(
-            async {
-                let users = octocrab::instance()
-                    .get::<Vec<octocrab::models::User>, _, _>(
-                        format!(
-                            "repos/{}/{}/collaborators",
-                            &github.config.owner, &github.config.repo
-                        ),
-                        None::<&()>,
-                    )
-                    .await?;
-
-                let user_names = futures::future::join_all(
-                    users.into_iter().map(|u| GitHub::get_github_user(u.login)),
-                )
-                .await
-                .into_iter()
-                .collect::<Result<Vec<_>>>()?;
-
-                Ok::<_, Error>(user_names)
-            },
-            async {
-                Ok(octocrab::instance()
-                    .teams(&github.config.owner)
-                    .list()
-                    .send()
-                    .await
-                    .ok()
-                    .unwrap_or_default())
-            },
-        )
-        .await?;
-
-        let mut map = HashMap::new();
-
-        for user in users {
-            map.insert(user.login, user.name);
-        }
-
-        for team in teams {
-            map.insert(format!("#{}", team.slug), team.description);
-        }
-
-        Ok::<_, Error>(map)
-    }
-
     pub async fn get_pull_request_mergeability(
         &self,
         number: u64,
@@ -438,15 +387,10 @@ impl GitHub {
             number: number as i64,
         };
         let request_body = PullRequestMergeabilityQuery::build_query(variables);
-        let res = self
-            .graphql_client
-            .post(self.config.api_base_url() + "graphql")
-            .json(&request_body)
-            .send()
-            .await?;
-        let response_body: Response<
-            pull_request_mergeability_query::ResponseData,
-        > = res.json().await?;
+        let response_body: Response<pull_request_mergeability_query::ResponseData> =
+            octocrab::instance()
+                .post("graphql", Some(&request_body))
+                .await?;
 
         if let Some(errors) = response_body.errors {
             let error = Err(Error::new(format!(
