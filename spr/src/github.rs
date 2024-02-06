@@ -17,6 +17,18 @@ use crate::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// The ../ is a trick so we can use octocrab for graphql post requests for
+/// both GitHub Enterprise (GHE) and GitHub Cloud. For GHE the GraphQL endpoint
+/// is https://github.example.org/api/graphql but the base_url for the rest api
+/// is https://github.example.org/api/v3
+/// by using ../graphql, https://github.example.org/api/v3/../graphql is canonicallized
+/// to the correct graphql.
+///
+/// For Github Cloud the base_url is https://api.github.com/ and the GraphQL endpoint
+/// is https://api.github.com/graphql, so https://api.github.com/../graphql will also
+/// canonicallize to the correct graphql endpoint as it already sits at the root.
+pub const GRAPHQL_PATH: &str = "../graphql";
+
 #[derive(Clone)]
 pub struct GitHub {
     config: crate::config::Config,
@@ -171,7 +183,7 @@ impl GitHub {
         };
         let request_body = PullRequestQuery::build_query(variables);
         let response_body: Response<pull_request_query::ResponseData> = octocrab::instance()
-            .post("graphql", Some(&request_body))
+            .post(GRAPHQL_PATH, Some(&request_body))
             .await?;
 
         if let Some(errors) = response_body.errors {
@@ -389,7 +401,7 @@ impl GitHub {
         let request_body = PullRequestMergeabilityQuery::build_query(variables);
         let response_body: Response<pull_request_mergeability_query::ResponseData> =
             octocrab::instance()
-                .post("graphql", Some(&request_body))
+                .post(GRAPHQL_PATH, Some(&request_body))
                 .await?;
 
         if let Some(errors) = response_body.errors {
@@ -489,6 +501,17 @@ impl GitHubBranch {
         // The branch name is `ref_on_github` with the `refs/heads/` prefix
         // (length 11) removed
         &self.ref_on_github[11..]
+    }
+}
+
+pub fn create_octocrab_builder(token: String, host: &Option<String>) -> octocrab::OctocrabBuilder {
+    let builder = octocrab::OctocrabBuilder::new()
+        .personal_token(token);
+    if let Some(ref x) = host {
+        let base_url = format!("https://{}/api/v3/", x);
+        builder.base_url(base_url).unwrap()
+    } else {
+        builder
     }
 }
 

@@ -10,6 +10,7 @@ use lazy_regex::regex;
 
 use crate::{
     error::{Error, Result, ResultExt},
+    github::create_octocrab_builder,
     output::output,
 };
 
@@ -75,14 +76,27 @@ pub async fn init() -> Result<()> {
         return Err(Error::new("Cannot continue without an access token."));
     }
 
-    let octocrab = octocrab::OctocrabBuilder::new()
-        .personal_token(pat.clone())
+    let github_api_domain = dialoguer::Input::<String>::new()
+        .with_prompt("Github Enterprise API domain (leave empty for github.com)")
+        .with_initial_text(
+            config
+                .get_string("spr.githubApiDomain")
+                .ok()
+                .unwrap_or_else(|| "".to_string()),
+        )
+        .allow_empty(true)
+        .interact_text()
+        .ok()
+        .filter(|api_domain| !api_domain.is_empty());
+
+    let octocrab = create_octocrab_builder(pat.clone(), &github_api_domain)
         .build()?;
     let github_user = octocrab.current().user().await?;
 
     output("👋", &formatdoc!("Hello {}!", github_user.login))?;
 
     config.set_str("spr.githubAuthToken", &pat)?;
+    config.set_str("spr.githubApiDomain", &github_api_domain.unwrap_or("".to_string()))?;
 
     // Name of remote
 
@@ -122,7 +136,7 @@ pub async fn init() -> Result<()> {
 
     let url = repo.find_remote(&remote)?.url().map(String::from);
     let regex =
-        lazy_regex::regex!(r#"github\.com[/:]([\w\-\.]+/[\w\-\.]+?)(.git)?$"#);
+        lazy_regex::regex!(r#"[^/]+[/:]([\w\-\.]+/[\w\-\.]+?)(.git)?$"#);
     let github_repo = config
         .get_string("spr.githubRepository")
         .ok()

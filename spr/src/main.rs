@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use reqwest::{self, header};
 use spr::{
     commands,
+    github::create_octocrab_builder,
     error::{Error, Result},
     output::output,
 };
@@ -135,6 +136,10 @@ pub async fn spr() -> Result<()> {
         .get_bool("spr.requireTestPlan")
         .ok()
         .unwrap_or(true);
+    let github_api_domain = git_config
+        .get_string("spr.githubApiDomain")
+        .map(|x| if x.is_empty() { None } else { Some(x) })
+        .unwrap_or_else(|_| None);
 
     let config = spr::config::Config::new(
         github_owner,
@@ -144,6 +149,7 @@ pub async fn spr() -> Result<()> {
         branch_prefix,
         require_approval,
         require_test_plan,
+        github_api_domain,
     );
 
     let git = spr::git::Git::new(repo);
@@ -158,7 +164,7 @@ pub async fn spr() -> Result<()> {
     }?;
 
     octocrab::initialise(
-        octocrab::Octocrab::builder().personal_token(github_auth_token.clone()),
+        create_octocrab_builder(github_auth_token.clone(), &config.github_api_domain)
     )?;
 
     let mut headers = header::HeaderMap::new();
