@@ -18,7 +18,7 @@ pub struct Config {
     pub branch_prefix: String,
     pub require_approval: bool,
     pub require_test_plan: bool,
-    pub github_api_domain: String,
+    pub github_api_domain: Option<String>,
 }
 
 impl Config {
@@ -30,7 +30,7 @@ impl Config {
         branch_prefix: String,
         require_approval: bool,
         require_test_plan: bool,
-        github_api_domain: String,
+        github_api_domain: Option<String>,
     ) -> Self {
         let master_ref = GitHubBranch::new_from_branch_name(
             &master_branch,
@@ -50,16 +50,15 @@ impl Config {
     }
 
     pub fn pull_request_url(&self, number: u64) -> String {
-        if self.github_api_domain == "api.github.com" {
-            format!(
+        match &self.github_api_domain {
+            None => format!(
                 "https://github.com/{owner}/{repo}/pull/{number}",
                 owner = &self.owner,
                 repo = &self.repo
-            )
-        } else {
-            format!(
+            ),
+            Some(x) => format!(
                 "https://{domain}/{owner}/{repo}/pull/{number}",
-                domain = &self.github_api_domain,
+                domain = x,
                 owner = &self.owner,
                 repo = &self.repo
             )
@@ -152,17 +151,6 @@ impl Config {
             self.master_ref.branch_name(),
         )
     }
-
-    pub fn api_base_url(&self) -> String {
-        if self.github_api_domain == "api.github.com" {
-            "https://api.github.com/".into()
-        } else {
-            format!(
-                "https://{domain}/api/",
-                domain = &self.github_api_domain,
-            )
-        }
-    }
 }
 
 #[cfg(test)]
@@ -179,7 +167,7 @@ mod tests {
             "spr/foo/".into(),
             false,
             true,
-            "api.github.com".into(),
+            None,
         )
     }
 
@@ -203,7 +191,7 @@ mod tests {
             "spr/foo/".into(),
             false,
             true,
-            "github.acme.com".into(),
+            Some("github.acme.com".into()),
         );
 
         assert_eq!(

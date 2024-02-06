@@ -10,6 +10,7 @@ use lazy_regex::regex;
 
 use crate::{
     error::{Error, Result, ResultExt},
+    github::create_octocrab_builder,
     output::output,
 };
 
@@ -76,33 +77,26 @@ pub async fn init() -> Result<()> {
     }
 
     let github_api_domain = dialoguer::Input::<String>::new()
-        .with_prompt("Github API domain (override for Github Enterprise)")
+        .with_prompt("Github Enterprise API domain (leave empty for github.com)")
         .with_initial_text(
             config
                 .get_string("spr.githubApiDomain")
                 .ok()
-                .unwrap_or_else(|| "api.github.com".to_string()),
+                .unwrap_or_else(|| "".to_string()),
         )
-        .interact_text()?;
+        .allow_empty(true)
+        .interact_text()
+        .ok()
+        .filter(|api_domain| !api_domain.is_empty());
 
-    config.set_str("spr.githubApiDomain", &github_api_domain)?;
-
-    let api_base_url;
-    if github_api_domain == "api.github.com" {
-        api_base_url = "https://api.github.com/v3/".into()
-    } else {
-        api_base_url = format!("https://{github_api_domain}/api/v3/");
-    };
-
-    let octocrab = octocrab::OctocrabBuilder::new()
-        .base_url(api_base_url)?
-        .personal_token(pat.clone())
+    let octocrab = create_octocrab_builder(pat.clone(), &github_api_domain)
         .build()?;
     let github_user = octocrab.current().user().await?;
 
     output("👋", &formatdoc!("Hello {}!", github_user.login))?;
 
     config.set_str("spr.githubAuthToken", &pat)?;
+    config.set_str("spr.githubApiDomain", &github_api_domain.unwrap_or("".to_string()))?;
 
     // Name of remote
 
